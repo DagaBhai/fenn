@@ -1,8 +1,7 @@
 from typing import Optional, Union, List
 import torch
 from pathlib import Path
-#from pathlib import Path
-
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from fenn.logging import Logger
 
 class Trainer:
@@ -13,6 +12,7 @@ class Trainer:
                  loss_fn,
                  optim,
                  epochs,
+                 num_classes,
                  device="cpu",
                  checkpoint_dir: Optional[Union[Path, str]] = None, 
                  checkpoint_epochs: Optional[Union[int, List[int]]] = None,
@@ -30,6 +30,8 @@ class Trainer:
         self._loss_fn = loss_fn
         self._optimizer = optim
         self._epochs = epochs
+        self._num_classes = num_classes
+
         self._metrics = {}
 
         # chechpoint setup 
@@ -98,8 +100,30 @@ class Trainer:
             torch.save(checkpoint, best_filepath)
             self._logger.system_info(f"Best model checkpoint saved to {best_filepath} with loss {loss:.4f}.")
 
+    def _binary_predict(self, data_loader):
+        self._model.eval()
+        predictions = []
+        with torch.no_grad():
+            for data, labels in data_loader:
+                data = data.to(self._device)
+                logits = self._model(data)
+                preds = torch.sigmoid(logits).squeeze(-1)
+                preds = (preds > 0.5).long()
+                predictions.extend(preds.cpu().tolist())
+        return predictions
 
-    def fit(self, train_loader, start_epoch: int = 0):
+    def _multiclass_predict(self, data_loader):
+        self._model.eval()
+        predictions = []
+        with torch.no_grad():
+            for data, labels in data_loader:
+                data = data.to(self._device)
+                logits = self._model(data)
+                preds = torch.argmax(logits, axis=1)
+                predictions.extend(preds.cpu().tolist())
+        return predictions
+    
+    def fit(self, train_loader, val_loader = None, val_epoch: int = 5, start_epoch: int = 0):
 
         for epoch in range(start_epoch, self._epochs):
             self._logger.system_info(f"Epoch {epoch} started.")
@@ -123,6 +147,24 @@ class Trainer:
             mean_loss = total_loss / n_batches
             print(f"Epoch {epoch}. Mean Loss: {mean_loss:.4f}")
             
+            if val_loader is not None and epoch % val_epoch == 0:
+                val_predictions = self.predict(val_loader)
+                self._model.train()  # set back to train mode after prediction
+                val_labels = []
+                
+                for _, labels in val_loader:
+                    val_labels.extend(labels.cpu().tolist())
+
+                
+                val_acc = accuracy_score(val_labels, val_predictions)
+                val_precision = precision_score(val_labels, val_predictions, zero_division=0)
+                val_recall = recall_score(val_labels, val_predictions, zero_division=0)
+                val_f1 = f1_score(val_labels, val_predictions, zero_division=0)
+                print(f"Epoch {epoch}. Validation Accuracy: {val_acc:.4f}")
+                print(f"Epoch {epoch}. Validation Precision: {val_precision:.4f}")
+                print(f"Epoch {epoch}. Validation Recall: {val_recall:.4f}")
+                print(f"Epoch {epoch}. Validation F1 Score: {val_f1:.4f}")
+                                
             # check if this is the best model so far
             is_best = mean_loss < self._best_loss
             if is_best:
@@ -143,6 +185,12 @@ class Trainer:
 
         return self._model
 
+    def predict(self, data_loader):
+        if self._num_classes == 2:
+            return self._binary_predict(data_loader)
+        else:
+            return self._multiclass_predict(data_loader)
+        
     def load_checkpoint(self, checkpoint_path: Union[Path, str]):
         """Load a checkpoint from the given path.
         
