@@ -1,12 +1,4 @@
-import builtins
-import os
-import re
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
-
-from colorama import Fore, Style
 
 class baseLogger(ABC):
     @abstractmethod
