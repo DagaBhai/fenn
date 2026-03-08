@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fenn.args import Parser
+from fenn.logging.backends.fnxml import FnXmlBackend
 from fenn.logging.backends.logging import LoggingBackend
 from fenn.logging.backends.tensorboard import TensorboardBackend
 from fenn.logging.backends.wandb import WandbBackend
@@ -35,6 +36,7 @@ class Logger:
         self._keystore = KeyStore()
 
         self._logging_backend = LoguruBackend() if _LOGURU_AVAILABLE else LoggingBackend()
+        self._fnxml_backend = FnXmlBackend()
 
         self._wandb_backend = WandbBackend(
             keystore=self._keystore,
@@ -51,26 +53,35 @@ class Logger:
         self._args: Optional[Dict[str, Any]] = None
         self._initialized = True
 
+        if hasattr(self._logging_backend, "set_print_sink"):
+            self._logging_backend.set_print_sink(self._fnxml_backend.log_print)
+
     # --------------------------
     # same public API as before
     # --------------------------
     def system_info(self, message: str) -> None:
         self._logging_backend.system_info(message)
+        self._fnxml_backend.system_info(message)
 
     def system_warning(self, message: str) -> None:
         self._logging_backend.system_warning(message)
+        self._fnxml_backend.system_warning(message)
 
     def system_exception(self, message: str) -> None:
         self._logging_backend.system_exception(message)
+        self._fnxml_backend.system_exception(message)
 
     def user_info(self, message: str) -> None:
         self._logging_backend.user_info(message)
+        self._fnxml_backend.user_info(message)
 
     def user_warning(self, message: str) -> None:
         self._logging_backend.user_warning(message)
+        self._fnxml_backend.user_warning(message)
 
     def user_exception(self, message: str) -> None:
         self._logging_backend.user_exception(message)
+        self._fnxml_backend.user_exception(message)
 
     # --------------------------
     # lifecycle
@@ -78,6 +89,7 @@ class Logger:
     def start(self) -> None:
         self._args = self._parser.args
         self._logging_backend.start(self._args)
+        self._fnxml_backend.start(self._args)
 
         if self._args.get("wandb"):
             self._wandb_backend.start(self._args)
@@ -90,6 +102,7 @@ class Logger:
         self._wandb_backend.stop()
         self._tensorboard_backend.stop()
         self._logging_backend.stop()
+        self._fnxml_backend.stop()
 
     # --------------------------
     # accessors (optional)
@@ -105,3 +118,7 @@ class Logger:
     @property
     def log_file(self) -> Optional[Path]:
         return self._logging_backend.log_file
+
+    @property
+    def fn_log_file(self) -> Optional[Path]:
+        return self._fnxml_backend.log_file

@@ -3,7 +3,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from fenn.logging.backends.baseLogger import baseLogger
 
 from colorama import Fore, Style
@@ -17,6 +17,7 @@ class LoggingBackend(baseLogger):
         self._log_file: Optional[Path] = None
         self._ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
         self._enabled = False
+        self._print_sink: Optional[Callable[[str, datetime], None]] = None
 
     # ---- public (system tags) ----
     def system_info(self, message: str) -> None:
@@ -89,12 +90,18 @@ class LoggingBackend(baseLogger):
 
         if self._log_file:
             clean_message = self._ansi_escape.sub("", message)
-            timestamp = datetime.now().replace(microsecond=0).isoformat(" ")
+            timestamp_dt = datetime.now().replace(microsecond=0)
+            timestamp = timestamp_dt.isoformat(" ")
             with open(self._log_file, "a", encoding="utf-8") as f:
                 f.write(f"[{timestamp}] {clean_message}\n")
+            if self._print_sink is not None:
+                self._print_sink(clean_message, timestamp_dt)
 
         self._original_print(*objects, sep=sep, end=end, file=file, flush=flush)
 
     @property
     def log_file(self) -> Optional[Path]:
         return self._log_file
+
+    def set_print_sink(self, sink: Optional[Callable[[str, datetime], None]]) -> None:
+        self._print_sink = sink
