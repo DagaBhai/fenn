@@ -1,6 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import Optional, Union, cast
 
 import torch
 import torch.nn
@@ -15,15 +15,6 @@ from torch.utils.data import DataLoader
 
 from fenn.logging import Logger
 from fenn.nn.utils import Checkpoint, TrainingState
-
-if TYPE_CHECKING:
-    from rich.progress import (
-        BarColumn,
-        MofNCompleteColumn,
-        Progress,
-        TextColumn,
-        TimeElapsedColumn,
-    )
 
 try:
     from rich.progress import (
@@ -267,7 +258,7 @@ class Trainer:
                     val_acc = accuracy_score(val_labels, val_predictions)
                     
                     if HAS_RICH:
-                        progress.console.print(f"[bold blue]Epoch {epoch+1}/{self._epochs}[/bold blue] Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
+                        progress.console.print(f"[bold blue]Epoch {epoch+1}/{epochs + 1}[/bold blue] Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
                     else:
                         print(f"Epoch {epoch}. Validation Loss: {val_mean_loss:.4f}")
                         print(f"Epoch {epoch}. Validation Accuracy: {val_acc:.4f}")
