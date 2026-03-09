@@ -16,19 +16,13 @@ from torch.utils.data import DataLoader
 from fenn.logging import Logger
 from fenn.nn.utils import Checkpoint, TrainingState
 
-try:
-    from rich.progress import (
-        BarColumn,
-        MofNCompleteColumn,
-        Progress,
-        TextColumn,
-        TimeElapsedColumn,
-    )
-
-    HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
-
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 class Trainer:
     """The base Trainer class for classification tasks."""
@@ -151,27 +145,22 @@ class Trainer:
 
         state = self._state
 
-        if HAS_RICH:
-            progress = Progress(
-                TextColumn(
-                    "[bold blue]Epoch {task.fields[epoch]}/{task.fields[total_epochs]}"
-                ),
-                BarColumn(),
-                MofNCompleteColumn(),
-                TimeElapsedColumn(),
-            )
-            progress.start()
-            epoch_task = progress.add_task(
-                "Training",
-                total=epochs - state.epoch,
-                epoch=state.epoch,
-                total_epochs=epochs,
-                info="",
-            )
-
-        else:
-            progress = None
-            epoch_task = None
+        progress = Progress(
+            TextColumn(
+                "[bold blue]Epoch {task.fields[epoch]}/{task.fields[total_epochs]}"
+            ),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+        )
+        progress.start()
+        epoch_task = progress.add_task(
+            "Training",
+            total=epochs - state.epoch,
+            epoch=state.epoch,
+            total_epochs=epochs,
+            info="",
+        )
 
         for epoch in range(state.epoch + 1, epochs + 1):
             state.epoch = epoch
@@ -201,15 +190,13 @@ class Trainer:
                 raise ValueError("train_loader produced 0 batches; cannot train.")
 
             state.train_loss = total_loss / n_batches
-            if progress:
-                progress.update(
-                    epoch_task,  # pyright: ignore[reportArgumentType]
-                    advance=1,
-                    epoch=epoch,
-                    info=f"Train Mean Loss : {state.train_loss:.4f}",
-                )
-            else:
-                print(f"Epoch {epoch}. Train Mean Loss: {state.train_loss:.4f}")
+            
+            progress.update(
+                epoch_task,  # pyright: ignore[reportArgumentType]
+                advance=1,
+                epoch=epoch,
+                info=f"Train Mean Loss : {state.train_loss:.4f}",
+            )
 
             # --- NO VALIDATION ---
             if val_loader is None:
@@ -256,24 +243,17 @@ class Trainer:
                 if val_n_batches > 0:
                     val_mean_loss = val_total_loss / val_n_batches
                     val_acc = accuracy_score(val_labels, val_predictions)
+                
+                    progress.console.print(f"[bold blue]Epoch {epoch+1}/{epochs + 1}[/bold blue] Train Loss: {state.train_loss:.4f} | Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
                     
-                    if HAS_RICH:
-                        progress.console.print(f"[bold blue]Epoch {epoch+1}/{epochs + 1}[/bold blue] Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
-                    else:
-                        print(f"Epoch {epoch}. Validation Loss: {val_mean_loss:.4f}")
-                        print(f"Epoch {epoch}. Validation Accuracy: {val_acc:.4f}")
 
                 state.val_loss = val_total_loss / val_n_batches
                 state.acc = accuracy_score(val_labels, val_predictions)
 
-                if progress:
-                    progress.update(
-                        epoch_task,  # pyright: ignore[reportArgumentType]
-                        info=f"Train Mean Loss: {state.train_loss:.4f} | Val Loss: {state.val_loss:.4f} | Val Acc: {state.acc:.4f}",
-                    )
-                else:
-                    print(f"Epoch {epoch}. Validation Loss: {state.val_loss:.4f}")
-                    print(f"Epoch {epoch}. Validation Accuracy: {state.acc:.4f}")
+                progress.update(
+                    epoch_task,  # pyright: ignore[reportArgumentType]
+                    info=f"Train Mean Loss: {state.train_loss:.4f} | Val Loss: {state.val_loss:.4f} | Val Acc: {state.acc:.4f}",
+                )
 
                 if state.val_loss < state.best_val_loss:
                     state.best_val_loss = state.val_loss
@@ -317,8 +297,7 @@ class Trainer:
                 )
                 break
 
-        if progress:
-            progress.stop()
+        progress.stop()
 
     def _replace_state(self, new_state: TrainingState):
         """Replace the current training state with a new state.
