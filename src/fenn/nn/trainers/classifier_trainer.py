@@ -1,167 +1,99 @@
-from typing import Optional, Union, List
-import copy
-import torch
+from copy import deepcopy
 from pathlib import Path
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from typing import Optional, Union, cast
+
+import torch
+import torch.nn
+import torch.optim
+from sklearn.metrics import (  # noqa: F401
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
+from torch.utils.data import DataLoader
+
 from fenn.logging import Logger
+from fenn.nn.utils import Checkpoint, TrainingState
+from fenn.nn.trainers import Trainer
 
-class ClassificationTrainer:
-    """The base Trainer class for classification tasks."""
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
-    def __init__(self,
-                 model,
-                 loss_fn,
-                 optim,
-                 epochs,
-                 num_classes,
-                 device="cpu",
-                 return_model: str = "last",
-                 checkpoint_dir: Optional[Union[Path, str]] = None,
-                 checkpoint_epochs: Optional[Union[int, List[int]]] = None,
-                 checkpoint_name: str = "checkpoint",
-                 save_best: bool = False,
-                 early_stopping_patience: Optional[int] = None,
-                 monitor: str = "val_loss"
-                 ):
+class ClassificationTrainer(Trainer):
+    """
+    ClassificationTrainer is an extension extends the base Trainer to support 
+    binary, multi-class, and multi-label classification support.
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        loss_fn: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        num_classes: int,
+        multi_label: bool = False,
+        device: Union[torch.device, str] = "cpu",
+        early_stopping_patience: Optional[int] = None,
+        checkpoint_config: Optional[Checkpoint] = None,
+    ):
+        """Initialize a Trainer instance to fit a neural network model.
+
+        Args:
+            model: The neural network model to train.
+            loss_fn: The loss function to use.
+            optim: The optimizer to use.
+            num_classes: The number of classes to predict.
+            device: The device on which the data will be loaded.
+            early_stopping_patience: The number of epochs to wait before early stopping.
+            checkpoint_config: The checkpoint configuration. If `None`, checkpointing is disabled.
+        """
+        super().__init__(
+            model = model,
+            loss_fn = loss_fn,
+            optim = optim,
+            device = device,
+            early_stopping_patience = early_stopping_patience,
+            checkpoint_config = checkpoint_config,
+            num_classes=num_classes
+        )
 
         self._logger = Logger()
-
-        self._device = device
-        
-        self._model = model.to(device)
-        self._loss_fn = loss_fn
-        self._optimizer = optim
-        self._epochs = epochs
         self._num_classes = num_classes
-        self._return_model = return_model.lower()
+        self.multi_label = multi_label
+        self._task_type = "classification"
 
-        if self._return_model not in {"last", "best"}:
-            raise ValueError("return_model must be 'last' or 'best'")
+        if num_classes < 1:
+            raise ValueError("num_classes must be >= 1")
+        if self.multi_label and num_classes < 2:
+            raise ValueError("Multi-label classification requires num_classes >= 2")
 
-        self._metrics = {}
-
-        # chechpoint setup
-        self._checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
-        self._checkpoint_epochs = checkpoint_epochs
-        self._checkpoint_name = checkpoint_name
-        self._save_best = save_best
-
-        self._best_acc = float("-inf")
-        self._best_loss = float("inf")
-        self._monitor = monitor.lower()
-
-        # early stopping setup
-        self._early_stopping_patience = early_stopping_patience
-        self._patience_counter = 0
-
-        # create the checkpoint directory if it doesn't exist and is enabled
-        if self._checkpoint_dir and (self._checkpoint_epochs is not None or self._save_best):
-            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            if self._checkpoint_epochs is not None:
-                self._logger.system_info(f"Checkpointing enabled. Checkpoints will be saved to {self._checkpoint_dir} every {self._checkpoint_epochs} epochs.")
-            if self._save_best:
-                self._logger.system_info(f"Best model checkpointing enabled. Best model will be saved to {self._checkpoint_dir}.")
-
-        # log early stopping setup
-        if self._early_stopping_patience is not None:
-            self._logger.system_info(f"Early stopping enabled with patience of {self._early_stopping_patience} epochs.")
-
-
-    def _should_save_checkpoint(self, epoch: int):
-        """Determine if a checkpoint should be saved at the given epoch.
-
-        Args:
-            epoch (int): The current epoch number. (0-indexed)
-        Returns:
-            bool: True if a checkpoint should be saved, False otherwise.
-
-        """
-        if self._checkpoint_dir is None or self._checkpoint_epochs is None:
-            return False
-
-        if isinstance(self._checkpoint_epochs, int):
-            # save every N epochs
-            return epoch % self._checkpoint_epochs == 0 or epoch == self._epochs-1
-        elif isinstance(self._checkpoint_epochs, list):
-            # save at specific epochs
-            return epoch in self._checkpoint_epochs
-        return False
-
-    def _save_checkpoint(self, epoch: int, loss: float, is_best: bool = False):
-        """Save a checkpoint of the model at the given epoch.
-
-        Args:
-            epoch (int): The current epoch number. (0-indexed)
-            loss: training loss for this epoch
-            is_best: if true save as best model
-        """
-        if self._checkpoint_dir is None:
-            return
-
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': self._model.state_dict(),
-            'optimizer_state_dict': self._optimizer.state_dict(),
-            'loss': loss,
-            'best_acc': self._best_acc,
-            'best_loss': self._best_loss
-        }
-
-        if not is_best:
-            filename = f"{self._checkpoint_name}_epoch_{epoch}.pt"
-            filepath = self._checkpoint_dir / filename
-            torch.save(checkpoint, filepath)
-            self._logger.system_info(f"Checkpoint saved at epoch {epoch} to {filepath}.")
-
+        if multi_label:
+            self._task_type = "multilabel"
+        elif num_classes == 2:
+            self._task_type = "binary"
         else:
-            best_filepath = self._checkpoint_dir / f"{self._checkpoint_name}_best.pt"
-            torch.save(checkpoint, best_filepath)
-            self._logger.system_info(f"Best model checkpoint saved to {best_filepath} with loss {loss:.4f}.")
+            self._task_type = "multiclass"
 
-    def _binary_predict(self, data_loader):
-        self._model.eval()
-        predictions = []
-        with torch.no_grad():
-            for data, labels in data_loader:
-                data = self._move_to_device(data, self._device)
-                logits = self._model(data)
-                preds = torch.sigmoid(logits).squeeze(-1)
-                preds = (preds > 0.5).long()
-                predictions.extend(preds.cpu().tolist())
-        return predictions
+        if multi_label:
+            self._logger.system_info(f"Multi-label classification ({num_classes} labels) mode")
+        elif num_classes == 2:
+            self._logger.system_info("Binary classification mode detected.")
+        else:
+            self._logger.system_info(f"Multi-class classification ({num_classes} classes)")
 
-    def _multiclass_predict(self, data_loader):
-        self._model.eval()
-        predictions = []
-        with torch.no_grad():
-            for data, labels in data_loader:
-                data = self._move_to_device(data, self._device)
-                logits = self._model(data)
-                preds = torch.argmax(logits, dim=1)
-                predictions.extend(preds.cpu().tolist())
-        return predictions
-    
-    def _compute_metrics(self, val_labels, val_predictions):
-        self._model.eval()
-        metrics = {}
-        metrics["accuracy"] = accuracy_score(val_labels, val_predictions)
-        avg = "binary" if self._num_classes==2 else "macro"
-        metrics["precision"] = precision_score(val_labels, val_predictions, average=avg)
-        metrics["recall"] = recall_score(val_labels, val_predictions, average=avg)
-        metrics["f1"] = f1_score(val_labels, val_predictions,average=avg)
-        return metrics
-
-
-    def _move_to_device(self, batch, device):
-        if torch.is_tensor(batch):
-            return batch.to(device)
-        if isinstance(batch, (list, tuple)):
-            return type(batch)(self._move_to_device(x, device) for x in batch)
-        if isinstance(batch, dict):
-            return {k: self._move_to_device(v, device) for k, v in batch.items()}
-        return batch
-
-    def fit(self, train_loader, val_loader=None, val_epochs: int = 5, start_epoch: int = 0):
+    def fit(
+        self,
+        train_loader: DataLoader,
+        epochs: int,
+        val_loader: Optional[DataLoader] = None,
+        val_epochs: int = 1,
+    ):
         """Train the model with optional validation and early stopping.
 
         The behaviour depends on the combination of `val_loader` and
@@ -176,19 +108,39 @@ class ClassificationTrainer:
 
         Args:
             train_loader: DataLoader for training data.
+            epochs: Total number of epochs to train for.
             val_loader: DataLoader for validation data (optional).
             val_epochs: How often to evaluate on validation set (in epochs).
-            start_epoch: Epoch to resume training from.
 
         Returns:
             The trained model (returned according to ``return_model``).
         """
 
-        best_state_dict = None
-        for epoch in range(start_epoch, self._epochs):
+        state = self._state
+
+        progress = Progress(
+            TextColumn(
+                "[bold blue]Epoch {task.fields[epoch]}/{task.fields[total_epochs]}"
+            ),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+        )
+        progress.start()
+        epoch_task = progress.add_task(
+            "Training",
+            total=epochs - state.epoch,
+            epoch=state.epoch,
+            total_epochs=epochs,
+            info="",
+        )
+
+        for epoch in range(state.epoch + 1, epochs + 1):
+            state.epoch = epoch
+            state.model_state_dict = None
+            state.optimizer_state_dict = None
 
             # --- TRAIN ---
-            self._logger.system_info(f"Epoch {epoch} started.")
             self._model.train()
             total_loss = 0.0
             n_batches = 0
@@ -196,10 +148,10 @@ class ClassificationTrainer:
             for data, labels in train_loader:
                 data = self._move_to_device(data, self._device)
                 labels = labels.to(self._device)
-
+                
                 if self._num_classes==2:
                             labels = labels.view(-1,1).float()
-        
+
                 outputs = self._model(data)
                 loss = self._loss_fn(outputs, labels)
 
@@ -213,20 +165,27 @@ class ClassificationTrainer:
             if n_batches == 0:
                 raise ValueError("train_loader produced 0 batches; cannot train.")
 
-            train_mean_loss = total_loss / n_batches
-            print(f"Epoch {epoch}. Train Mean Loss: {train_mean_loss:.4f}")
+            state.train_loss = total_loss / n_batches
+            
+            progress.update(
+                epoch_task,  # pyright: ignore[reportArgumentType]
+                advance=1,
+                epoch=epoch,
+                info=f"Train Mean Loss : {state.train_loss:.4f}",
+            )
 
             # --- NO VALIDATION ---
             if val_loader is None:
-                if train_mean_loss < self._best_loss:
-                    self._best_loss = train_mean_loss
-                    self._patience_counter = 0
+                state.val_loss = None
+
+                if state.train_loss < state.best_train_loss:
+                    state.best_train_loss = state.train_loss
+                    state.patience_counter = 0
                 else:
-                    self._patience_counter += 1
+                    state.patience_counter += 1
 
             # --- VALIDATION ---
-            elif (epoch - start_epoch) % val_epochs == 0:  # or epoch == self._epochs - 1
-
+            elif epoch % val_epochs == 0 or epoch == epochs:
                 self._model.eval()
                 val_labels = []
                 val_predictions = []
@@ -238,9 +197,6 @@ class ClassificationTrainer:
                         data = self._move_to_device(data, self._device)
                         labels = labels.to(self._device)
 
-                        if self._num_classes==2:
-                            labels = labels.view(-1,1).float()
-        
                         outputs = self._model(data)
                         val_batch_loss = self._loss_fn(outputs, labels)
 
@@ -253,61 +209,59 @@ class ClassificationTrainer:
                             preds = (preds > 0.5).long()
                         else:
                             preds = torch.argmax(outputs, dim=1)
-                            
+
                         val_predictions.extend(preds.cpu().tolist())
                         val_labels.extend(labels.cpu().tolist())
-                            
+
                 if val_n_batches == 0:
                     raise ValueError("val_loader produced 0 batches; cannot validate.")
+                
+                if val_n_batches > 0:
+                    val_mean_loss = val_total_loss / val_n_batches
+                    val_acc = accuracy_score(val_labels, val_predictions)
+                
+                    progress.console.print(f"[bold blue]Epoch {epoch+1}/{epochs + 1}[/bold blue] Train Loss: {state.train_loss:.4f} | Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
+                    
 
-                val_mean_loss = val_total_loss / val_n_batches
-                val_acc = accuracy_score(val_labels, val_predictions)
-                metrics = self._compute_metrics(val_labels, val_predictions)
-                print(f"Epoch {epoch}. Accuracy: {val_acc:.4f}, Loss: {val_mean_loss:.4f}, Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}, F1: {metrics['f1']:.4f}")
+                state.val_loss = val_total_loss / val_n_batches
+                state.acc = accuracy_score(val_labels, val_predictions)
 
-                """
-                The current epoch is better than all previous ones: 
-                either val_acc got higher (maximize) or 
-                val_loss got lower (minimize) or
-                val_f1 got higher (maximize)
-                """
+                progress.update(
+                    epoch_task,  # pyright: ignore[reportArgumentType]
+                    info=f"Train Mean Loss: {state.train_loss:.4f} | Val Loss: {state.val_loss:.4f} | Val Acc: {state.acc:.4f}",
+                )
 
-                if self._monitor == "val_loss":
-                    current = val_mean_loss
-                    best = self._best_loss
-                    mode = "min"
-                elif self._monitor == "val_acc":
-                    current = val_acc
-                    best = self._best_acc
-                    mode = "max"
-                elif self._monitor == "val_f1":
-                    current = metrics['f1']
-                    best = self._best_f1
-                    mode = "max"
+                if state.val_loss < state.best_val_loss:
+                    state.best_val_loss = state.val_loss
 
-                if (mode == "min" and current < best) or (mode == "max" and current > best):
-                    if mode == "min":
-                        self._best_loss = current
-                    elif mode == "max":
-                        if self._monitor == "val_acc":
-                            self._best_acc = current
-                        else:
-                            self._best_f1 = current
-                    best_state_dict = copy.deepcopy(self._model.state_dict())
-                    self._patience_counter = 0
+                    # Update best state for improved val_loss
+                    self._best_state = state.clone(
+                        model_state_dict=self._model.state_dict(),
+                        optimizer_state_dict=self._optimizer.state_dict(),
+                    )
+                    self._best_model = deepcopy(self._model)
+                    self._best_model.load_state_dict(self._best_state.model_state_dict)  # pyright: ignore[reportArgumentType]
+
+                    if self._checkpoint is not None:
+                        self._checkpoint.save(self._best_state, is_best=True)
+
+                    state.patience_counter = 0
                 else:
-                    self._patience_counter += 1
+                    state.patience_counter += 1
 
-                #TODO  rest of some things
+                if state.acc > state.best_acc:
+                    state.best_acc = state.acc
 
             # --- CHECKPOINTING ---
-            if self._should_save_checkpoint(epoch):
-                self._save_checkpoint(epoch, train_mean_loss, is_best=False)
+            if self._should_save_checkpoint(epoch, is_last_epoch=(epoch == epochs)):
+                state.model_state_dict = self._model.state_dict()
+                state.optimizer_state_dict = self._optimizer.state_dict()
+                cast(Checkpoint, self._checkpoint).save(state)
 
             # --- EARLY STOPPING ---
             if (
                 self._early_stopping_patience is not None
-                and self._patience_counter >= self._early_stopping_patience
+                and state.patience_counter >= self._early_stopping_patience
             ):
                 if val_loader is None:
                     _reason = "training loss"
@@ -319,92 +273,55 @@ class ClassificationTrainer:
                 )
                 break
 
-        if self._return_model == "best":
-            if val_loader is None:
-                self._logger.system_info(
-                    "return_model='best' requested but no validation loader provided; returning last model."
-                )
-            elif best_state_dict is None:
-                self._logger.system_info(
-                    "return_model='best' requested but best_state_dict has not been updated; returning last model."
-                )
-            else:
-                print(f"Loading best model with validation accuracy {self._best_acc:.4f}")
-                self._model.load_state_dict(best_state_dict)
+        progress.stop()
 
-        return self._model
-
-    def predict(self, data_loader, return_proba: bool = False):
-        """
-        Main prediction method.
-
-        Args : 
-            data loader: DataLoader
-            return_proba: If True, also returns probabilities
-
-        Returns:
-            List[int]                     -> predicted classes
-            or Tuple[List[int], np.ndarray] -> (classes, probabilities)
-        """
-        if self._num_classes == 2:
-            preds = self._binary_predict(data_loader)
-            if not return_proba:
-                return preds
-            return preds, self._binary_proba(data_loader)
-        else:
-            preds = self._multiclass_predict(data_loader)
-            if not return_proba:
-                return preds
-            return preds, self._multiclass_proba(data_loader)
-        
-    def _binary_proba(self, data_loader):
-        self._model.eval()
-        proba = []
-        with torch.no_grad():
-            for data, label in data_loader:
-                data = self._move_to_device(data, self._device)
-                logits = self._model(data)
-                preds = torch.sigmoid(logits).squeeze(-1)
-                proba.extend(preds.cpu().tolist())
-        return proba
-    
-
-    def _multiclass_proba(self, data_loader):
-        self._model.eval()
-        proba = []
-        with torch.no_grad():
-            for data, label in data_loader:
-                data = self._move_to_device(data, self._device)
-                logits = self._model(data)
-                preds = torch.argmax(logits, dim=1)
-                proba.extend(preds.cpu().tolist())
-        return proba
-
-    def load_checkpoint(self, checkpoint_path: Union[Path, str]):
-        """Load a checkpoint from the given path.
+    def predict(self, dataloader_or_batch: Union[DataLoader, torch.Tensor], return_proba: bool = False):
+        """Predicts the output of the model for a given dataloader or batch.
 
         Args:
-            checkpoint_path (Path or str): Path to the checkpoint file.
+            dataloader_or_batch: A DataLoader or a torch tensor.
+            return_proba: If true, also returns the predicted probabilities alongside the predicted labels
 
         Returns:
-            Epoch number from the loaded checkpoint
-
-        Example:
-            > trainer = Trainer(model, loss_fn, optimizer, epoch=100)
-            > start_epoch = trainer.load_checkpoint("checkpoints/checkpoint_epoch_50.pt")
-            # now you can resume training from epoch 51
+            list: A list of predictions.
+            list[list]: 
+                If `return_proba=True`, returns a tuple where:
+                - first element is the list of predicted labels
+                - second element is the list of predicted probabilities
         """
-        checkpoint_path = Path(checkpoint_path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Checkpoint file {checkpoint_path} does not exist.")
 
-        checkpoint = torch.load(checkpoint_path, map_location=self._device)
-        self._model.load_state_dict(checkpoint['model_state_dict'])
-        self._optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        epoch = checkpoint['epoch']
-        loss = checkpoint.get('loss', float('inf'))
-        self._best_loss = checkpoint.get('best_loss', float('inf'))
-        self._best_acc = checkpoint.get('best_acc', float('-inf'))
+        self._model.eval()
+        predictions = []
+        proba = []
 
-        self._logger.system_info(f"Checkpoint loaded from {checkpoint_path}. Resuming from epoch {epoch} with loss {loss:.4f}.")
-        return epoch
+        def predict_batch(batch):
+            batch = self._move_to_device(batch, self._device)
+            logits = self._model(batch)
+            if self._task_type == "binary":
+                preds = torch.sigmoid(logits).squeeze(-1)
+                if return_proba:
+                    proba.extend(preds.cpu().tolist())
+                preds = (preds > 0.5).long()
+            elif self._task_type == "multiclass":
+                preds = torch.softmax(logits, dim=1)
+                if return_proba:
+                    proba.extend(preds.cpu().tolist())
+                preds = torch.argmax(logits, dim=1)
+            else:
+                preds = torch.sigmoid(logits)
+                if return_proba:
+                    proba.extend(preds.cpu().tolist())
+                preds = (preds > 0.5).long()
+            predictions.extend(preds.cpu().tolist())
+
+        with torch.no_grad():
+            if isinstance(dataloader_or_batch, DataLoader):
+                for data, _ in dataloader_or_batch:
+                    predict_batch(data)
+            else:
+                predict_batch(dataloader_or_batch)
+        
+        if return_proba:
+            return predictions, proba
+        
+        return predictions

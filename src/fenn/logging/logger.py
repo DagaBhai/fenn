@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from colorama import Fore, Style
+
 from fenn.args import Parser
 from fenn.logging.backends.fnxml import FnXmlBackend
 from fenn.logging.backends.logging import LoggingBackend
@@ -61,27 +63,61 @@ class Logger:
     # --------------------------
     def system_info(self, message: str) -> None:
         self._logging_backend.system_info(message)
-        self._fnxml_backend.system_info(message)
-
-    def system_warning(self, message: str) -> None:
-        self._logging_backend.system_warning(message)
-        self._fnxml_backend.system_warning(message)
+        
+        # system_info is called before arguments are loaded, so we need to check if self._args is not None before accessing it
+        if self._args and self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.system_info(message)
 
     def system_exception(self, message: str) -> None:
         self._logging_backend.system_exception(message)
-        self._fnxml_backend.system_exception(message)
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.system_exception(message)
 
     def user_info(self, message: str) -> None:
         self._logging_backend.user_info(message)
-        self._fnxml_backend.user_info(message)
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.user_info(message)
 
     def user_warning(self, message: str) -> None:
         self._logging_backend.user_warning(message)
-        self._fnxml_backend.user_warning(message)
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.user_warning(message)
 
     def user_exception(self, message: str) -> None:
         self._logging_backend.user_exception(message)
-        self._fnxml_backend.user_exception(message)
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.user_exception(message)
+
+    def write_config(self, message: str) -> None:
+
+        colors = [
+            Fore.LIGHTCYAN_EX,
+            Fore.LIGHTBLUE_EX,
+            Fore.LIGHTMAGENTA_EX,
+            Fore.LIGHTGREEN_EX,
+        ]
+
+        flat_config = self._flatten_dict(self._args)
+
+        for k, v in flat_config.items():
+            parts = k.split("/")
+            colored_parts = []
+
+            for i, part in enumerate(parts):
+                color = colors[i % len(colors)]
+                colored_parts.append(f"{color}{part}{Style.RESET_ALL}")
+            
+
+            if hasattr(self._logging_backend, "write_config"):
+                self._logging_backend.write_config(f"{'/'.join(colored_parts)}: {v}")
+            else:
+                self._logging_backend.user_info(f"{'/'.join(colored_parts)}: {v}")
+
+        if hasattr(self._logging_backend, "flush_config_table"):
+            self._logging_backend.flush_config_table()
+        
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.write_config(message)
 
     # --------------------------
     # lifecycle
@@ -89,7 +125,9 @@ class Logger:
     def start(self) -> None:
         self._args = self._parser.args
         self._logging_backend.start(self._args)
-        self._fnxml_backend.start(self._args)
+
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.start(self._args)
 
         if self._args.get("wandb"):
             self._wandb_backend.start(self._args)
@@ -99,11 +137,31 @@ class Logger:
 
     def stop(self) -> None:
         # stop external backends first, then restore print
-        self._wandb_backend.stop()
-        self._tensorboard_backend.stop()
         self._logging_backend.stop()
-        self._fnxml_backend.stop()
 
+        if self._args.get("wandb"):
+            self._wandb_backend.stop()
+        if self._args.get("tensorboard"):
+            self._tensorboard_backend.stop()    
+        if self._args.get("logger", {}).get("fnxml", False):
+            self._fnxml_backend.stop()
+
+    @staticmethod
+    def _flatten_dict(d: dict, parent_key: str = "", sep: str = "/") -> dict:
+        """Recursively flattens a nested dictionary."""
+
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(
+                    Logger._flatten_dict(v, new_key, sep=sep).items()
+                )
+            else:
+                items.append((new_key, v))
+
+        return dict(items)
+    
     # --------------------------
     # accessors (optional)
     # --------------------------
