@@ -253,12 +253,7 @@ class Trainer:
                     if self._save_best:
                         self._save_checkpoint(epoch, train_mean_loss, is_best=True)
 
-                if val_mean_loss < self._best_loss:
-                    self._best_loss = val_mean_loss
-                    self._patience_counter = 0
-                else:
-                    self._patience_counter += 1
-
+                
             # --- CHECKPOINTING ---
             if self._should_save_checkpoint(epoch):
                 self._save_checkpoint(epoch, train_mean_loss, is_best=False)
