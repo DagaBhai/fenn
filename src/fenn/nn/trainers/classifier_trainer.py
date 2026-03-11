@@ -60,7 +60,6 @@ class ClassificationTrainer(Trainer):
             device = device,
             early_stopping_patience = early_stopping_patience,
             checkpoint_config = checkpoint_config,
-            num_classes=num_classes
         )
 
         self._logger = Logger()
@@ -220,7 +219,7 @@ class ClassificationTrainer(Trainer):
                     val_mean_loss = val_total_loss / val_n_batches
                     val_acc = accuracy_score(val_labels, val_predictions)
                 
-                    progress.console.print(f"[bold blue]Epoch {epoch+1}/{epochs + 1}[/bold blue] Train Loss: {state.train_loss:.4f} | Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
+                    progress.console.print(f"[bold blue]Epoch {epoch}/{epochs}[/bold blue] Train Loss: {state.train_loss:.4f} | Val Loss: {val_mean_loss:.4f} | Val Acc: {val_acc:.4f}")
                     
 
                 state.val_loss = val_total_loss / val_n_batches
