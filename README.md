@@ -141,7 +141,7 @@ The development and long-term direction of **fenn** is guided by the following m
 
 | Maintainer | Role |
 |------------|------|
-| [@blkdmr](https://github.com/blkdmr) | Project Creator · Lead Maintainer |
+| [@blkdmr](https://github.com/blkdmr) | Creator & Project Administrator |
 | [@giuliaOddi](https://github.com/giuliaOddi) | Project Administrator |
 | [@GlowCheese](https://github.com/GlowCheese) | Core Maintainer |
 
