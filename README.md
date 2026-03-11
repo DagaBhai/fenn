@@ -129,13 +129,22 @@ python main.py
 
 ## Contributing
 
-Contributions are welcome!
+Contributions are welcome! We can then discuss a possible contribution together, answer any questions, and help you get started!
 
-If you’re interested in helping, please feel free to join our [discord server](https://discord.gg/WxDkvktBAa) or the dedicated
-[discussion page](https://github.com/blkdmr/fenn/discussions/11) and ping there your availability.
-
-We can then discuss a possible contribution together, answer any questions, and help you get started!
+Interested in contributing? Join the community on [Discord](https://discord.gg/WxDkvktBAa)
 
 **Please, before opening a pull request, consult our CONTRIBUTING.md**
+
+## Maintainers
+
+The development and long-term direction of fenn is guided by the core maintainers:
+
+| Maintainer | Role |
+|------------|------|
+| [@blkdmr](https://github.com/blkdmr) | Creator & Admin |
+| [@giuliaOddi](https://github.com/giuliaOddi) | Admin |
+| [@GlowCheese](https://github.com/GlowCheese) | Core Maintainer |
+
+Core maintainers review pull requests, coordinate releases, and ensure project quality.
 
 Thank you for your support!
