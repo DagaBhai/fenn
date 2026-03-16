@@ -14,7 +14,7 @@ from sklearn.metrics import (  # noqa: F401
 from torch.utils.data import DataLoader
 
 from fenn.logging import Logger
-from fenn.nn.utils import Checkpoint, TrainingState
+from fenn.nn.utils import Checkpoint, ModelPrettyPrinter, TrainingState
 
 
 class Trainer(ABC):
@@ -52,6 +52,7 @@ class Trainer(ABC):
         self._model = model.to(device)
         self._optimizer = optim
         self._state = TrainingState(epoch=0)
+        self._log_model_summary()
 
         self._best_state: Optional[TrainingState] = None
         """Best training state based on validation loss."""
@@ -69,6 +70,10 @@ class Trainer(ABC):
             self._logger.display_info(
                 f"Early stopping enabled with patience of {self._early_stopping_patience} epochs."
             )
+
+    def _log_model_summary(self) -> None:
+        summary = ModelPrettyPrinter(self._model).render()
+        self._logger.display_info(summary, display_on_terminal=False)
 
     def _move_to_device(self, batch, device: Union[torch.device, str]):
         if torch.is_tensor(batch):
