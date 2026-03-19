@@ -183,7 +183,7 @@ def main(args):
 
 Contributions are welcome! 
 
-Interested in contributing? Join the community on [Discord](https://discord.gg/WxDkvktBAa).
+Interested in contributing? Join the community on [Discord](https://discord.com/invite/6v9xtJxvN7).
 
 We can then discuss a possible contribution together, answer any questions, and help you get started!
 
