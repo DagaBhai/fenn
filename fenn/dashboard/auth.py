@@ -3,20 +3,21 @@
 The dashboard is a localhost-only Flask app. To authenticate, the user
 generates a "dashboard token" on pyfenn.com, pastes it into the
 ``/connect`` page, and the server validates it once against
-``https://pyfenn.com/api/dashboard/me``. On success we store
+``https://pyfenn.com/api/dashboard/me``. On success, we store
 ``{user_id, email}`` in a signed Flask session cookie and discard the
 token — it is never written to disk or kept in memory.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from functools import wraps
 from typing import Optional
 
 import requests
 from flask import g, redirect, session, url_for
+
+from fenn.utils.logging import logger
 
 AUTH_URL = "https://pyfenn.com"
 ME_PATH = "/api/dashboard/me"
@@ -27,8 +28,6 @@ _TOKEN_RE = re.compile(r"^fdt_[A-Za-z0-9_-]{43}$")
 _MAX_TOKEN_LEN = 64
 _MAX_RESPONSE_BYTES = 4096
 _TIMEOUT = (5, 10)  # (connect, read) seconds
-
-logger = logging.getLogger(__name__)
 
 
 class InvalidTokenError(Exception):
