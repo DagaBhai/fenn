@@ -2,6 +2,7 @@ name: "Bug report"
 description: Create a report to help us improve
 title: "Bug: "
 labels: ["bug"]
+
 body:
   - type: textarea
     id: describe-bug
@@ -15,10 +16,10 @@ body:
     id: reproduce
     attributes:
       label: How to reproduce
-      description: Include source code and/or steps to reproduce the behavior.
+      description: Include relevant source code and/or steps to reproduce the behavior.
       placeholder: |
         ```python
-        from faststream import FastStream
+        # Minimal reproducible example
         ...
         ```
 
@@ -56,9 +57,12 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Include the output of the `faststream -v` command to display your current project and system environment.
-      placeholder: Run `faststream -v` in your terminal and paste the output here.
-      render: shell
+      description: Provide details about your project and system environment (e.g., OS, Python version, package versions, etc.).
+      placeholder: |
+        - OS:
+        - Python version:
+        - Package version:
+        - Installation method:
     validations:
       required: true
 
